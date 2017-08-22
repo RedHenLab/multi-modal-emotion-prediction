@@ -27,9 +27,9 @@ LOGDIR = HOME_PATH+'/GSOC/training_logs/'+RUN+'/'
 # constants and flags 
 
 Y_SHAPE = 3
-N_LABELS = 7
+N_LABELS = 6
 N_FEATURES = 34
-N_WORDS = 18
+N_WORDS = 50
 LEN_WORD_FEATURES = 240
 EMBEDDING_SIZE = 300
 BATCH_SIZE = 100
@@ -50,7 +50,9 @@ def read_from_tfrecord(filenames):
     tfrecord_features = tf.parse_single_example(tfrecord_serialized,
                         features={
                             'audio_features'    : tf.FixedLenFeature([],tf.string),
-                            'word_embeddings'   : tf.FixedLenFeature([],tf.string),
+                            'audio_len'         : tf.FixedLenFeature([],tf.string),
+                            'sentence_len'      : tf.FixedLenFeature([],tf.string),
+                            #'word_embeddings'   : tf.FixedLenFeature([],tf.string),
                             'y'                 : tf.FixedLenFeature([],tf.string),
                             'label'             : tf.FixedLenFeature([],tf.string),
                                     },  name='tf_features')
@@ -58,9 +60,9 @@ def read_from_tfrecord(filenames):
     audio_features = tf.reshape(audio_features, (N_FEATURES,LEN_WORD_FEATURES,N_WORDS))
     audio_features.set_shape((N_FEATURES,LEN_WORD_FEATURES,N_WORDS))
     
-    word_embeddings = tf.decode_raw(tfrecord_features['word_embeddings'],tf.float32)
-    word_embeddings = tf.reshape(word_embeddings, (EMBEDDING_SIZE,N_WORDS))
-    word_embeddings.set_shape((EMBEDDING_SIZE,N_WORDS))
+    #word_embeddings = tf.decode_raw(tfrecord_features['word_embeddings'],tf.float32)
+    #word_embeddings = tf.reshape(word_embeddings, (EMBEDDING_SIZE,N_WORDS))
+    #word_embeddings.set_shape((EMBEDDING_SIZE,N_WORDS))
     
     y = tf.decode_raw(tfrecord_features['y'],tf.float32)
     y.set_shape((Y_SHAPE))
@@ -68,86 +70,70 @@ def read_from_tfrecord(filenames):
     label = tf.decode_raw(tfrecord_features['label'],tf.int32)
     label.set_shape((1,))
     
-    return audio_features, word_embeddings, y, label
-
-def word_batch_splitter(audio_input):
-    """
-    Splits and flattens audio features within an audio-word.
-    """
-    N_SPLITS = 24
-    split_audio = tf.split(audio_input, num_or_size_splits=N_SPLITS, axis=2)
-    shape = split_audio[0].get_shape().as_list()
-    split_audio = [tf.reshape(tf.squeeze(tensor), [shape[0],shape[1]*shape[2]]) for tensor in split_audio]
-    return split_audio
-
-def sequence_batch_splitter(inputs_sequence_batch):
-    """
-    Splits sentences.
-    """
-    N_SPLITS = 18
-    ax = len(inputs_sequence_batch.get_shape().as_list())-1
-    splitted_inputs = tf.split(inputs_sequence_batch, num_or_size_splits=N_SPLITS, axis=ax)
-    return splitted_inputs
-
-def produce_input_sequence(audio, words):
-    """
-    Concatenates corresponding word2vec embeddings with output of LSTM for audio words.
-    """
-    split_words = sequence_batch_splitter(words)
-    sentences = [tf.concat([audio[i], tf.squeeze(split_words[i])], axis=1) for i in range(N_WORDS)]
-    return sentences
+    audio_len = tf.decode_raw(tfrecord_features['audio_len'],tf.int32)
+    audio_len.set_shape((N_WORDS))
+    
+    sentence_len = tf.decode_raw(tfrecord_features['sentence_len'],tf.int32)
+    sentence_len.set_shape((1,))
+    
+    return audio_features, y, label, audio_len, sentence_len
 
 def init_LSTM(size):
-    """
-    Initialization of LSTM cell. 
-    TO DO's: unfolding, forget biasses=1, perhaps writing the cell by hand and tuning the initializers
-    """
     rnn_cell = rnn.LSTMCell(size,initializer=tf.contrib.layers.xavier_initializer())
     return rnn_cell
      
-def word_LSTM(splitted_inputs,lstm_fw_cell, lstm_bw_cell):
-    """
-    Runs LSTM over chunks of the word. The global var is needed for correct reusing.
-    """
+def word_LSTM(lstm_fw_cell, lstm_bw_cell, inputs,s_len, time_steps=LEN_WORD_FEATURES):
     global WORD_LSTM_REUSE
     with tf.variable_scope("audio_word_lstm") as scope:
         if not WORD_LSTM_REUSE:
-            outputs = run_LSTM(lstm_fw_cell, lstm_bw_cell, splitted_inputs)
+            outputs = bidirectional_dyn_rnn(lstm_fw_cell, lstm_bw_cell, inputs, s_len, time_steps)
             WORD_LSTM_REUSE = True
         else:
             scope.reuse_variables()
-            outputs = run_LSTM(lstm_fw_cell, lstm_bw_cell, splitted_inputs)
+            outputs = bidirectional_dyn_rnn(lstm_fw_cell, lstm_bw_cell, inputs, s_len, time_steps)
     return outputs
 
-def run_LSTM(lstm_fw_cell, lstm_bw_cell, splitted_inputs):
-    """
-    Runs and returns the right output of the cell
-    """
-    outputs, _, _ = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, splitted_inputs, dtype=tf.float32)
-    return outputs[-1]
+def bidirectional_dyn_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs, s_len, time_steps):
+    outputs, _ = tf.nn.bidirectional_dynamic_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs,
+                                                 sequence_length=s_len, dtype=tf.float32)
+    out = tf.concat([tf.squeeze(tf.split(o, num_or_size_splits=time_steps, axis=1)[-1]) for o in outputs],axis=1)
+    return out
 
 def regression_layer(lstm_output):
-    """
-    Projects to a prediction vector of size N_LABEL.
-    """
     shape = lstm_output.get_shape().as_list()
     net = tf.layers.dense(lstm_output, units=N_LABELS, name='regression')
     return net
 
-def model(audio, words, lstm_fw_cell_1, lstm_bw_cell_1, lstm_fw_cell_2, lstm_bw_cell_2, reuse=False):
+def double_lstm(audio_features, audio_len, sentence_len,
+                #word_embeddings,
+                lstm_fw_cell_1, 
+                lstm_bw_cell_1,
+                lstm_fw_cell_2, 
+                lstm_bw_cell_2,
+                reuse=False):
     with tf.variable_scope("model") as scope:
         if reuse:
             scope.reuse_variables()
-        # audio - first LSTM
-        audio_sentence = sequence_batch_splitter(audio)
-        audio_chunks_sentence = [word_batch_splitter(audio) for audio in audio_sentence]
-        audio_lstm = [word_LSTM(audio,lstm_fw_cell_1, lstm_bw_cell_1) for audio in audio_chunks_sentence]
-        
-        # audio + word - second LSTM
-        sentence_in = produce_input_sequence(audio_lstm, words)
-        sentence_out = run_LSTM(lstm_fw_cell_2, lstm_bw_cell_2,sentence_in)
-        prediction = regression_layer(sentence_out)
-    return prediction
+        features = tf.split(audio_features, num_or_size_splits=BATCH_SIZE, axis=0)
+        audio_lens = tf.split(audio_len, num_or_size_splits=BATCH_SIZE, axis=0)
+        print(features[1])
+        features = [tf.transpose(tf.squeeze(f), perm=[2, 1, 0]) for f in features]
+        print(features[1])
+        features = [tf.layers.dropout(f,0.3) for f in features]
+        lstm_1 = [word_LSTM(lstm_fw_cell_1, lstm_bw_cell_1, 
+                            features[i], tf.squeeze(audio_lens[i])) for i in range(BATCH_SIZE)]
+        lstm_1 = tf.stack(lstm_1,0)
+        print(lstm_1)
+        #lstm_1_plus_embed = tf.concat([lstm_1,tf.transpose(word_embeddings, perm=[0,2,1])],axis=2)
+        #print(lstm_1_plus_embed)
+        lstm_1 = tf.layers.dropout(lstm_1,0.4)
+        lstm_2 = bidirectional_dyn_rnn(lstm_fw_cell_2, lstm_bw_cell_2, 
+                                       lstm_1, tf.squeeze(sentence_len), N_WORDS)
+        print(lstm_2)
+        lstm_2 = tf.layers.dropout(lstm_2,0.4)
+        regression = regression_layer(lstm_2)
+        #regression = tf.layers.dropout(regression,0.5)
+    return regression
 
 def summary_accuracy(predictions,labels,summary_name):
     """
@@ -162,24 +148,31 @@ def summary_accuracy(predictions,labels,summary_name):
 ######################## MAIN ########################
 
 if __name__ == "__main__":
-    audio_feature, word_embedding, _, label = read_from_tfrecord(TRAIN_SPLIT)
-    audio_features, word_embeddings, labels = tf.train.batch([audio_feature, word_embedding, label], 
+    audio_feature, _, label, audio_len, sentence_len = read_from_tfrecord(TRAIN_SPLIT)
+    audio_features,  labels, audio_lens,sentence_lens = tf.train.batch([audio_feature, 
+                                                                     # word_embedding, 
+                                                                    label, 
+                                                                    audio_len,
+                                                                    sentence_len], 
                                                             batch_size=BATCH_SIZE, capacity=256, num_threads=15)
 
-    test_audio_feature, test_word_embedding, _, test_label = read_from_tfrecord(VALIDATION_SPLIT)
-    test_audio_features, test_word_embeddings, test_labels = tf.train.batch([test_audio_feature, 
-                                                                test_word_embedding, test_label], 
-                                                                batch_size=BATCH_SIZE, capacity=256, num_threads=15)
+    test_audio_feature, _, test_label, test_audio_len,test_sentence_len = read_from_tfrecord(VALIDATION_SPLIT)
+    test_audio_features, test_labels, test_audio_lens,test_sentence_lens = tf.train.batch([test_audio_feature, 
+                                                                                         # test_word_embedding, 
+                                                                                          test_label,
+                                                                                          test_audio_len,
+                                                                                          test_sentence_len], 
+                                                            batch_size=BATCH_SIZE, capacity=256, num_threads=15)
     lstm_fw_cell_1 = init_LSTM(CELL_SIZE)
     lstm_bw_cell_1 = init_LSTM(CELL_SIZE)
     lstm_fw_cell_2 = init_LSTM(CELL_SIZE)
     lstm_bw_cell_2 = init_LSTM(CELL_SIZE)
 
-    predictions = model(audio_features, word_embeddings,
+    predictions = model(audio_features, audio_lens, sentence_lens, #word_embeddings,
                        lstm_fw_cell_1, lstm_bw_cell_1,
                        lstm_fw_cell_2,lstm_bw_cell_2)
 
-    test_predictions = model(test_audio_features,test_word_embeddings,
+    test_predictions = model(test_audio_features, test_audio_lens, test_sentence_lens, #test_word_embeddings,
                             lstm_fw_cell_1, lstm_bw_cell_1,
                             lstm_fw_cell_2, lstm_bw_cell_2, reuse=True)
 
