@@ -8,16 +8,19 @@ rnn = tf.contrib.rnn
 from tensorflow.contrib.layers.python.layers import layers as layers_lib
 from tensorflow.contrib.framework.python.ops import arg_scope
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import nn_ops
+
 
 ######################## FLAGS ########################
 
-RUN = 'run_name'
+RUN = 'run_batchsize20_bilstm32_learning_rate001'
 
 # paths to tf binaries + splitting into validation and test set
 
 HOME_PATH = '.'
-RECORD_FILES = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP/*')
-VALIDATION_SPLIT = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP/*_7_*')
+RECORD_FILES = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP_2/*')
+VALIDATION_SPLIT = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP_2/*_7_*')
 TRAIN_SPLIT = list(set(RECORD_FILES) - set(VALIDATION_SPLIT))
 
 # path where train logs will be saved
@@ -29,12 +32,12 @@ LOGDIR = HOME_PATH+'/GSOC/training_logs/'+RUN+'/'
 Y_SHAPE = 3
 N_LABELS = 6
 N_FEATURES = 34
-N_WORDS = 50
+N_WORDS = 50 #MAX LEN OF SENTENCE
 LEN_WORD_FEATURES = 240
 EMBEDDING_SIZE = 300
-BATCH_SIZE = 10
+BATCH_SIZE = 20
 WORD_LSTM_REUSE = False
-CELL_SIZE = 32
+CELL_SIZE = 16
 EPOCH = int(6031/BATCH_SIZE)
 STEPS = 50*EPOCH
 
@@ -78,6 +81,46 @@ def read_from_tfrecord(filenames):
     
     return audio_features, y, label, audio_len, sentence_len
 
+def _init_attention(n_hidden,idd='word'):
+
+    attention_task = tf.Variable(tf.zeros([1, n_hidden*2]),
+        name=idd+'attention_vector')
+
+    trans_weights = tf.Variable(tf.random_uniform([n_hidden*2, n_hidden*2], -1.0, 1.0),
+            name=idd+'transformation_weights')
+
+    trans_bias = tf.Variable(tf.zeros([n_hidden*2]), name=idd+'_trans_bias')
+
+    return attention_task, trans_weights, trans_bias
+
+def calculate_attention(embed, attention_task, trans_weights, trans_bias):
+
+    embeddings_flat = tf.reshape(embed, [-1, CELL_SIZE*2])
+
+    # Now calculate the attention-weight vector.
+
+    # tanh transformation of embeddings
+    keys_flat = tf.tanh(tf.add(tf.matmul(embeddings_flat,
+        trans_weights), trans_bias))
+
+    # reshape the keys according to our embed vector
+    keys = tf.reshape(keys_flat, tf.concat(axis=0,values=[tf.shape(embed)[:-1], [CELL_SIZE*2]]))
+
+    # calculate score for each word embedding and take softmax on it
+
+    scores = math_ops.reduce_sum(keys * attention_task, [2])
+    alignments = nn_ops.softmax(scores)
+
+    # expand aligments dimension so that we can multiply it with embed tensor
+    alignments = array_ops.expand_dims(alignments,2)
+
+    alignments = tf.identity(alignments, name='attention_weights')
+
+    # generate context vector by making 
+    context_vector = math_ops.reduce_sum(alignments * embed, [1])
+#   context_vector = tf.nn.dropout(context_vector, self.keep_prob)
+    return context_vector
+
 def init_LSTM(size):
     rnn_cell = rnn.LSTMCell(size,initializer=tf.contrib.layers.xavier_initializer())
     return rnn_cell
@@ -93,24 +136,33 @@ def word_LSTM(lstm_fw_cell, lstm_bw_cell, inputs,s_len, time_steps=LEN_WORD_FEAT
             outputs = bidirectional_dyn_rnn(lstm_fw_cell, lstm_bw_cell, inputs, s_len, time_steps)
     return outputs
 
+
+
 def bidirectional_dyn_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs, s_len, time_steps):
-    outputs, _ = tf.nn.bidirectional_dynamic_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs,
+    (fw_outputs,bw_outputs),(fw_state,bw_state)= tf.nn.bidirectional_dynamic_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs,
                                                  sequence_length=s_len, dtype=tf.float32)
-    out = tf.concat([tf.squeeze(tf.split(o, num_or_size_splits=time_steps, axis=1)[-1]) for o in outputs],axis=1)
-    return out
+    outputs = tf.concat((fw_outputs, bw_outputs), 2)
+    return outputs
 
 def regression_layer(lstm_output):
     shape = lstm_output.get_shape().as_list()
     net = tf.layers.dense(lstm_output, units=N_LABELS, name='regression')
     return net
 
-def double_LSTM(audio_features, audio_len, sentence_len,
+def double_lstm_with_attention(audio_features, audio_len, sentence_len,
                 #word_embeddings,
                 lstm_fw_cell_1, 
                 lstm_bw_cell_1,
                 lstm_fw_cell_2, 
                 lstm_bw_cell_2,
+                attention_word,
+                trans_weights_word,
+                trans_bias_word,
+                attention_sent,
+                trans_weights_sent,
+                trans_bias_sent,
                 reuse=False):
+
     with tf.variable_scope("model") as scope:
         if reuse:
             scope.reuse_variables()
@@ -122,16 +174,22 @@ def double_LSTM(audio_features, audio_len, sentence_len,
         features = [tf.layers.dropout(f,0.3) for f in features]
         lstm_1 = [word_LSTM(lstm_fw_cell_1, lstm_bw_cell_1, 
                             features[i], tf.squeeze(audio_lens[i])) for i in range(BATCH_SIZE)]
-        lstm_1 = tf.stack(lstm_1,0)
-        print(lstm_1)
+        lstm_1_attention = [calculate_attention(embed, attention_word, trans_weights_word,
+                            trans_bias_word) for embed in lstm_1]
+
+        lstm_1_attention = tf.stack(lstm_1_attention,0)
+
+        print(lstm_1_attention)
         #lstm_1_plus_embed = tf.concat([lstm_1,tf.transpose(word_embeddings, perm=[0,2,1])],axis=2)
         #print(lstm_1_plus_embed)
-        lstm_1 = tf.layers.dropout(lstm_1,0.4)
+        lstm_1_attention = tf.layers.dropout(lstm_1_attention,0.4)
         lstm_2 = bidirectional_dyn_rnn(lstm_fw_cell_2, lstm_bw_cell_2, 
-                                       lstm_1, tf.squeeze(sentence_len), N_WORDS)
-        print(lstm_2)
-        lstm_2 = tf.layers.dropout(lstm_2,0.4)
-        regression = regression_layer(lstm_2)
+                                       lstm_1_attention, tf.squeeze(sentence_len), N_WORDS)
+        lstm_2_attention = calculate_attention(lstm_2, attention_sent, trans_weights_sent,
+                                               trans_bias_sent)
+        print(lstm_2_attention)
+        lstm_2 = tf.layers.dropout(lstm_2_attention,0.4)
+        regression = regression_layer(lstm_2_attention)
         #regression = tf.layers.dropout(regression,0.5)
     return regression
 
@@ -168,13 +226,24 @@ if __name__ == "__main__":
     lstm_fw_cell_2 = init_LSTM(CELL_SIZE)
     lstm_bw_cell_2 = init_LSTM(CELL_SIZE)
 
-    predictions = model(audio_features, audio_lens, sentence_lens, #word_embeddings,
-                       lstm_fw_cell_1, lstm_bw_cell_1,
-                       lstm_fw_cell_2,lstm_bw_cell_2)
+    attention_word, trans_weights_word, trans_bias_word = _init_attention(CELL_SIZE ,idd='word')
+    attention_sent, trans_weights_sent, trans_bias_sent = _init_attention(CELL_SIZE ,idd='sent')
 
-    test_predictions = model(test_audio_features, test_audio_lens, test_sentence_lens, #test_word_embeddings,
+
+    predictions = double_lstm_with_attention(audio_features, audio_lens, sentence_lens, #word_embeddings,
+                       lstm_fw_cell_1, lstm_bw_cell_1,
+                       lstm_fw_cell_2,lstm_bw_cell_2,
+                       attention_word, trans_weights_word,
+                       trans_bias_word, attention_sent,
+                       trans_weights_sent, trans_bias_sent)
+
+    test_predictions = double_lstm_with_attention(test_audio_features, test_audio_lens, test_sentence_lens, #test_word_embeddings,
                             lstm_fw_cell_1, lstm_bw_cell_1,
-                            lstm_fw_cell_2, lstm_bw_cell_2, reuse=True)
+                            lstm_fw_cell_2, lstm_bw_cell_2,
+                            attention_word, trans_weights_word,
+                            trans_bias_word, attention_sent,
+                            trans_weights_sent, trans_bias_sent,
+                            reuse=True)
 
 
     cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,predictions)
@@ -190,7 +259,7 @@ if __name__ == "__main__":
 
     # for SGD with momentum:
     learning_rate = tf.train.exponential_decay(
-                       0.01,                      # Base learning rate.
+                       0.001,                      # Base learning rate.
                        global_step * BATCH_SIZE,  # Current index into the dataset.
                        1500,                      # Decay step.
                        0.1,                       # Decay rate.
