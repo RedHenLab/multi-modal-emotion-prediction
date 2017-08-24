@@ -19,21 +19,21 @@ The data pipeline is designed for the IEMOCAP data set, but you may use the func
 
 #### Audio feature extraction (shell script)
 
-python 2.7 
-pyAudioAnalysis + dependencies
+- python 2.7 (there is a fair chance that pyAudioAnalysis would work with python 3+, but unfortunately the author haven't dared to try it out)
+- pyAudioAnalysis + dependencies
 
 
 #### Data pipeline
 
-python 3.6
-pandas
-tensorflow
-gensim (for word2vec)
+- python 3.6
+- pandas
+- TensorFlow
+- gensim (for word2vec)
 
 #### Model
 
-python 3.6
-tensorflow
+- python 3.6
+- TensorFlow
 
 
 
