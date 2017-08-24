@@ -9,13 +9,18 @@ from tensorflow.contrib.layers.python.layers import layers as layers_lib
 from tensorflow.contrib.framework.python.ops import arg_scope
 from tensorflow.python.ops import array_ops
 
+# set a constant random seed for comparable results
+
+import random 
+#random.seed(0)
+
 ######################## FLAGS ########################
 
 # paths to tf binaries + splitting into validation and test set
 
-HOME_PATH = '/home/karolina/Documents/GSOC'
-RECORD_FILES = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP_2/*')
-VALIDATION_SPLIT = glob.glob(HOME_PATH+'/data/audio_features/IEMOCUP_2/*_7_*')
+#HOME_PATH = '/home/karolina/Documents/GSOC'
+RECORD_FILES = glob.glob('data_IEMOCUP/*')
+VALIDATION_SPLIT = glob.glob('/data_IEMOCUP/*_7_*')
 TRAIN_SPLIT = list(set(RECORD_FILES) - set(VALIDATION_SPLIT))
 
 # constants and flags 
@@ -26,14 +31,14 @@ N_FEATURES = 34
 LEN_SENTENCE = 25
 LEN_WORD = 60
 EMBEDDING_SIZE = 300
-BATCH_SIZE = 50
+BATCH_SIZE = 32
 WORD_LSTM_REUSE = False
-N_HIDDEN = 24
-LEARNING_RATE = 0.0001
+N_HIDDEN = 16
+LEARNING_RATE = 0.0002
 EPOCH = int(5500/BATCH_SIZE)
 STEPS = 60*EPOCH
 DECAY = 20*EPOCH
-DECAY_RATE = 0.3
+DECAY_RATE = 0.5
 
 # run name
 
@@ -41,7 +46,7 @@ RUN = 'run_wlen'+str(LEN_WORD)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDD
 
 # path where train logs will be saved
 
-LOGDIR = HOME_PATH+'/training_logs/'+RUN+'/'
+LOGDIR = '/training_logs/'+RUN+'/'
 
 ######################## FUNCTIONS ########################
 
@@ -166,7 +171,7 @@ if __name__ == "__main__":
                                                                     # audio_len,
                                                                     sentence_len], 
                                                             batch_size=BATCH_SIZE, capacity=256, num_threads=15,
-                                                            min_after_dequeue=600)
+                                                            min_after_dequeue=200)
 
     test_audio_feature, _, test_label, test_sentence_len = read_from_tfrecord(VALIDATION_SPLIT)
     test_audio_features, test_labels, test_sentence_lens = tf.train.shuffle_batch([test_audio_feature, 
@@ -175,7 +180,7 @@ if __name__ == "__main__":
                                                                                           #test_audio_len,
                                                                                           test_sentence_len], 
                                                             batch_size=BATCH_SIZE, capacity=256, num_threads=15,
-                                                            min_after_dequeue=600)
+                                                            min_after_dequeue=200)
     lstm_fw_cell_1 = init_LSTM(N_HIDDEN)
     lstm_bw_cell_1 = init_LSTM(N_HIDDEN)
     lstm_fw_cell_2 = init_LSTM(N_HIDDEN)
