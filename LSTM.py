@@ -31,19 +31,21 @@ N_FEATURES = 34
 LEN_SENTENCE = 25
 LEN_WORD = 60
 EMBEDDING_SIZE = 300
-BATCH_SIZE = 32
+BATCH_SIZE = 20
 WORD_LSTM_REUSE = False
-N_HIDDEN = 32
-N_HIDDEN_2 = 16
+N_HIDDEN = 16
+N_HIDDEN_2 = 6
 LEARNING_RATE = 0.0001
 EPOCH = int(5500/BATCH_SIZE)
-STEPS = 60*EPOCH
+STEPS = 120*EPOCH
 DECAY = 20*EPOCH
-DECAY_RATE = 0.5
+DECAY_RATE = 0.4
+
+MODEL = 'text' # # can be 'multimodal' or 'text'
 
 # run name
 
-RUN = 'multimodal_wlen'+str(LEN_WORD)+'_slen'+str(LEN_SENTENCE)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDDEN)+'/'+str(N_HIDDEN_2)+'_learning_rate'+str(LEARNING_RATE)+'_dropout0.5'
+RUN = 'onlywords_wlen'+str(LEN_WORD)+'_slen'+str(LEN_SENTENCE)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDDEN)+'/'+str(N_HIDDEN_2)+'_learning_rate'+str(LEARNING_RATE)+'_dropout0.5'
 
 # path where train logs will be saved
 
@@ -145,7 +147,7 @@ def words_LSTM(word_embeddings,
         if reuse:
             scope.reuse_variables()
         word_embeddings = tf.transpose(word_embeddings, perm=[0,2,1])
-        word_embeddings = tf.layers.dropout(word_embeddings,0.5)
+        word_embeddings = tf.layers.dropout(word_embeddings,0.4)
         lstm = bidirectional_dyn_rnn(lstm_fw_cell, lstm_bw_cell, word_embeddings, LEN_SENTENCE)
         return lstm
     
@@ -153,6 +155,18 @@ def combine_LSTM(audio_lstm,word_lstm,reuse=False):
     inputs = tf.concat([audio_lstm,word_lstm],axis=1)
     inputs = tf.layers.dropout(inputs,0.5)
     reg = regression_layer(inputs,reuse=reuse)
+    return reg
+
+def words_only(word_embeddings,
+                lstm_fw_cell, 
+                lstm_bw_cell,
+                reuse=False):
+    words = words_LSTM(word_embeddings,
+                lstm_fw_cell, 
+                lstm_bw_cell,
+                reuse=reuse)
+    words = tf.layers.dropout(words,0.3)
+    reg = regression_layer(words,reuse=reuse)
     return reg
 
 def multimodal_LSTM(word_embeddings,
@@ -223,28 +237,40 @@ if __name__ == "__main__":
     lstm_fw_cell_2 = init_LSTM(N_HIDDEN_2)
     lstm_bw_cell_2 = init_LSTM(N_HIDDEN_2)
 
-    predictions = multimodal_LSTM(word_embeddings,
-                lstm_fw_cell, 
-                lstm_bw_cell,
-                audio_features, 
-                sentence_len,
-                lstm_fw_cell_1, 
-                lstm_bw_cell_1,
-                lstm_fw_cell_2, 
-                lstm_bw_cell_2,
-                reuse=False)
+    if MODEL == 'text':
+        predictions = words_only(word_embeddings,
+                    lstm_fw_cell, 
+                    lstm_bw_cell,
+                    reuse=False)
 
-    test_predictions = multimodal_LSTM(word_embeddings,
-                lstm_fw_cell, 
-                lstm_bw_cell,
-                audio_features, 
-                sentence_len,
-                lstm_fw_cell_1, 
-                lstm_bw_cell_1,
-                lstm_fw_cell_2, 
-                lstm_bw_cell_2,
-                reuse=True)
+        test_predictions = words_only(test_word_embeddings,
+                    lstm_fw_cell, 
+                    lstm_bw_cell,
+                    reuse=True)
     
+    if MODEL == 'multimodal':
+        predictions = multimodal_LSTM(word_embeddings,
+                    lstm_fw_cell, 
+                    lstm_bw_cell,
+                    audio_features, 
+                    sentence_len,
+                    lstm_fw_cell_1, 
+                    lstm_bw_cell_1,
+                    lstm_fw_cell_2, 
+                    lstm_bw_cell_2,
+                    reuse=False)
+
+        test_predictions = multimodal_LSTM(word_embeddings,
+                    lstm_fw_cell, 
+                    lstm_bw_cell,
+                    audio_features, 
+                    sentence_len,
+                    lstm_fw_cell_1, 
+                    lstm_bw_cell_1,
+                    lstm_fw_cell_2, 
+                    lstm_bw_cell_2,
+                    reuse=True)
+    '''   
     # Loss and summaries
 
     cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,predictions)
