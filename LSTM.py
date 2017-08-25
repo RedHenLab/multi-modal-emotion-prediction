@@ -270,7 +270,7 @@ if __name__ == "__main__":
                     lstm_fw_cell_2, 
                     lstm_bw_cell_2,
                     reuse=True)
-    '''   
+      
     # Loss and summaries
 
     cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,predictions)
