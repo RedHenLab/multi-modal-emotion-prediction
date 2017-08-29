@@ -17,7 +17,6 @@ random.seed(0)
 
 # paths to tf binaries + splitting into validation and test set
 
-#HOME_PATH = '/home/karolina/Documents/GSOC'
 RECORD_FILES = glob.glob('data_IEMOCAP/*')
 VALIDATION_SPLIT = glob.glob('data_IEMOCAP/*_7_*')
 TRAIN_SPLIT = list(set(RECORD_FILES) - set(VALIDATION_SPLIT))
@@ -40,11 +39,12 @@ STEPS = 200*EPOCH
 DECAY = 30*EPOCH
 DECAY_RATE = 0.5
 
-MODEL = 'text' # # can be 'multimodal' or 'text'
+MODEL = 'text' # can be 'multimodal' or 'text'
 
 # run name
 
 RUN = MODEL+'_wlen'+str(LEN_WORD)+'_slen'+str(LEN_SENTENCE)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDDEN)+'/'+str(N_HIDDEN_2)+'_learning_rate'+str(LEARNING_RATE)
+
 # path where train logs will be saved
 
 LOGDIR = 'training_logs/'+RUN+'/'
@@ -86,10 +86,16 @@ def read_from_tfrecord(filenames):
     return audio_features, word_embeddings, label, sentence_len 
 
 def init_LSTM(size):
+    """
+    Initializes a LSTM cell of a given size
+    """
     rnn_cell = rnn.LSTMCell(size,initializer=tf.contrib.layers.xavier_initializer())
     return rnn_cell
      
 def word_LSTM(lstm_fw_cell, lstm_bw_cell, inputs, time_steps=LEN_WORD):
+    """
+    Runs the first layer of audio LSTM.
+    """
     global WORD_LSTM_REUSE
     with tf.variable_scope("audio_word_lstm") as scope:
         if not WORD_LSTM_REUSE:
@@ -101,6 +107,9 @@ def word_LSTM(lstm_fw_cell, lstm_bw_cell, inputs, time_steps=LEN_WORD):
     return outputs
 
 def bidirectional_dyn_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs, time_steps, **kwargs):
+    """
+    General bidirectional dynamic network that can be used with any cell and for any LSTM in the model.
+    """
     if 's_len' in kwargs:
         outputs, _ = tf.nn.bidirectional_dynamic_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs,
                                                      sequence_length=kwargs['s_len'], dtype=tf.float32)
@@ -111,6 +120,9 @@ def bidirectional_dyn_rnn(lstm_fw_cell_1, lstm_bw_cell_1, inputs, time_steps, **
     return out
 
 def regression_layer(lstm_output,reuse=False):
+    """
+    The final layer for regressing on a vector of a size of number of classes.
+    """
     with tf.variable_scope("regression") as scope:
         if reuse:
             scope.reuse_variables()
@@ -124,6 +136,9 @@ def audio_LSTM(audio_features, sentence_len,
                 lstm_fw_cell_2, 
                 lstm_bw_cell_2,
                 reuse=False):
+    """
+    Hierarchical audio LSTM layers.
+    """
     with tf.variable_scope("lstm_audio") as scope:
         if reuse:
             scope.reuse_variables()
@@ -141,6 +156,9 @@ def words_LSTM(word_embeddings,
                 lstm_fw_cell, 
                 lstm_bw_cell,
                 reuse=False):
+    """
+    Single LSTM layer for word embeddings.
+    """
     with tf.variable_scope("lstm_words") as scope:
         if reuse:
             scope.reuse_variables()
@@ -150,6 +168,9 @@ def words_LSTM(word_embeddings,
         return lstm
     
 def combine_LSTM(audio_lstm,word_lstm,reuse=False):
+    """
+    Combining the audio and text LSTMs outputs and regressing on prediction vector.
+    """
     inputs = tf.concat([audio_lstm,word_lstm],axis=1)
     inputs = tf.layers.dropout(inputs,0.5)
     reg = regression_layer(inputs,reuse=reuse)
@@ -159,6 +180,9 @@ def words_only(word_embeddings,
                 lstm_fw_cell, 
                 lstm_bw_cell,
                 reuse=False):
+    """
+    Runs the text only LSTM. Takes data as input and outputs prediction.
+    """
     words = words_LSTM(word_embeddings,
                 lstm_fw_cell, 
                 lstm_bw_cell,
@@ -178,6 +202,9 @@ def multimodal_LSTM(word_embeddings,
                 lstm_bw_cell_2,
                 reuse=False
                    ):
+    """
+    Runs the multi-modal LSTMs. Takes data as input and outputs prediction.
+    """
     audio = audio_LSTM(audio_features, 
                 sentence_len,
                 lstm_fw_cell_1, 
