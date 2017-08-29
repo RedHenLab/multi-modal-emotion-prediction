@@ -8,9 +8,12 @@ For more information visit the wiki page.
 
 The project consists of TensorFlow model and additional scripts for data preprocessing. 
 
-### LSTM.py
+### Running the training LSTM.py
+
+####LSTM.py
 This is the main file with model. Provided that you have cloned the repository, simply running this file from the command line will start the training of the network. If you want to change some hyperparameters - change them in this file.
 
+### Data preprocessing
 As the preprocessed data is already a part of the repository, the rest of the code doesn't need to be run on your pc unless you explicitly want to change something on the data preprocessing level. The data pipeline is designed for the IEMOCAP data set, but you may use the function that writes to records with your custom data as long as it fits to the format.
 
 ### data_preprocessing.sh
