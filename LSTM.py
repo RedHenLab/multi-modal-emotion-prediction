@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import glob
 import tensorflow as tf
 slim = tf.contrib.slim
@@ -37,16 +36,15 @@ N_HIDDEN = 16
 N_HIDDEN_2 = 6
 LEARNING_RATE = 0.0001
 EPOCH = int(5500/BATCH_SIZE)
-STEPS = 120*EPOCH
-DECAY = 20*EPOCH
-DECAY_RATE = 0.4
+STEPS = 200*EPOCH
+DECAY = 30*EPOCH
+DECAY_RATE = 0.5
 
 MODEL = 'text' # # can be 'multimodal' or 'text'
 
 # run name
 
-RUN = 'onlywords_wlen'+str(LEN_WORD)+'_slen'+str(LEN_SENTENCE)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDDEN)+'/'+str(N_HIDDEN_2)+'_learning_rate'+str(LEARNING_RATE)+'_dropout0.5'
-
+RUN = MODEL+'_wlen'+str(LEN_WORD)+'_slen'+str(LEN_SENTENCE)+'_batchsize'+str(BATCH_SIZE)+'_bilstm'+str(N_HIDDEN)+'/'+str(N_HIDDEN_2)+'_learning_rate'+str(LEARNING_RATE)
 # path where train logs will be saved
 
 LOGDIR = 'training_logs/'+RUN+'/'
