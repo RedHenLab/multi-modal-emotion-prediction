@@ -1,5 +1,5 @@
-import numpy as np
 import glob
+import numpy as np
 import tensorflow as tf
 slim = tf.contrib.slim
 layers = tf.contrib.layers
