@@ -1,7 +1,7 @@
 # multi-modal-emotion-prediction
 
 Project developed during Google Summer of Code.
-The repository contains a multi-modal machine learning model utilizing audio and text to predict emotional rating of sentences. The model is based on bi-directional LSTM cells.
+The repository contains a multi-modal machine learning model utilizing audio and text to predict the emotional rating of sentences. The model is based on bi-directional LSTM cells.
 For more (waaaaay more) information visit the wiki page.
 
 ## Getting Started
